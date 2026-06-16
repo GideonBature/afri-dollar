@@ -62,6 +62,7 @@ const mockPayrollBatchUpdate = prisma.payrollBatch.update as jest.Mock;
 const mockPayrollBatchUpdateMany = prisma.payrollBatch.updateMany as jest.Mock;
 const mockPayrollItemCreate = prisma.payrollItem.create as jest.Mock;
 const mockPayrollItemUpdate = prisma.payrollItem.update as jest.Mock;
+const mockPayrollItemUpdateMany = prisma.payrollItem.updateMany as jest.Mock;
 const mockAuditLogCreate = prisma.auditLog.create as jest.Mock;
 
 describe('PayrollService', () => {
@@ -470,6 +471,7 @@ describe('PayrollService', () => {
       expect(mockLoadAccount).not.toHaveBeenCalled();
       expect(mockSubmitTransaction).not.toHaveBeenCalled();
       expect(mockPayrollItemUpdate).not.toHaveBeenCalled();
+      expect(mockPayrollItemUpdateMany).not.toHaveBeenCalled();
       expect(mockPayrollBatchUpdate).not.toHaveBeenCalled();
     });
 

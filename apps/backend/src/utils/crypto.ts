@@ -8,17 +8,27 @@ const ITERATIONS = 100000;
 const KEY_LENGTH = 32;
 const DIGEST = 'sha256';
 
+let cachedSecret: string | undefined;
+let cachedKey: Buffer | undefined;
+
 /**
  * Retrieves the 32-byte encryption key from the environment.
  * Throws an error if ENCRYPTION_KEY is not configured.
- * Derives the key using PBKDF2 with a fixed salt and 100,000 iterations.
+ * Derives the key using PBKDF2 with a fixed salt and 100,000 iterations, caching the result.
  */
 function getEncryptionKey(): Buffer {
   const secret = process.env.ENCRYPTION_KEY;
   if (!secret) {
     throw new Error('ENCRYPTION_KEY environment variable is not configured.');
   }
-  return crypto.pbkdf2Sync(secret, SALT, ITERATIONS, KEY_LENGTH, DIGEST);
+
+  if (cachedKey && cachedSecret === secret) {
+    return cachedKey;
+  }
+
+  cachedSecret = secret;
+  cachedKey = crypto.pbkdf2Sync(secret, SALT, ITERATIONS, KEY_LENGTH, DIGEST);
+  return cachedKey;
 }
 
 /**
