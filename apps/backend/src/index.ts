@@ -6,6 +6,7 @@ import express, { json, urlencoded } from 'express';
 import helmet from 'helmet';
 
 import prisma from './config/database';
+import authRouter from './routes/auth.routes';
 
 // Load backend-level .env file
 config({ path: path.resolve(__dirname, '../.env') });
@@ -35,6 +36,9 @@ app.get('/api/v1', (_req, res) => {
     description: 'Stellar-powered financial infrastructure API',
   });
 });
+
+// Auth routes
+app.use('/api/v1/auth', authRouter);
 
 // Database connection check and server start
 async function startServer(): Promise<void> {

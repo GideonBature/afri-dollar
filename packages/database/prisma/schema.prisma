@@ -14,6 +14,7 @@ datasource db {
 model User {
   id            String    @id @default(cuid())
   email         String    @unique
+  passwordHash  String?
   phoneNumber   String?   @unique
   walletAddress String?   @unique
   firstName     String?
@@ -28,6 +29,7 @@ model User {
   wallets       Wallet[]
   transactions  Transaction[]
   kycRecords    KYCRecord[]
+  refreshTokens RefreshToken[]
 
   @@index([email])
   @@index([walletAddress])
@@ -232,4 +234,20 @@ model PayrollItem {
 
   @@index([payrollBatchId])
   @@index([status])
+}
+
+// Refresh token for JWT token rotation (stored as hash for security)
+model RefreshToken {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash    String   @unique
+  expiresAt    DateTime
+  isRevoked    Boolean  @default(false)
+  revokedAt    DateTime?
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([userId])
 }
