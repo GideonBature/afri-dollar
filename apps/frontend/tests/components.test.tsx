@@ -232,7 +232,7 @@ describe('UI Component Library Tests', () => {
     });
 
     it('handles image load and errors', () => {
-      const { rerender } = render(<Avatar src="test.jpg" name="John Doe" />);
+      render(<Avatar src="test.jpg" name="John Doe" />);
       // Image starts loading, showing skeleton
       expect(screen.getByTestId('avatar-skeleton')).toBeInTheDocument();
 
