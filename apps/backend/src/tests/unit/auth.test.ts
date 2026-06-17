@@ -21,9 +21,17 @@ jest.mock('../../config/database', () => ({
 }));
 
 describe('AuthService Unit Tests', () => {
+  const originalJwtSecret = process.env.JWT_SECRET;
+  const originalJwtRefreshSecret = process.env.JWT_REFRESH_SECRET;
+
   beforeAll(() => {
     process.env.JWT_SECRET = 'test-secret';
     process.env.JWT_REFRESH_SECRET = 'test-refresh-secret';
+  });
+
+  afterAll(() => {
+    process.env.JWT_SECRET = originalJwtSecret;
+    process.env.JWT_REFRESH_SECRET = originalJwtRefreshSecret;
   });
 
   describe('Password Hashing', () => {

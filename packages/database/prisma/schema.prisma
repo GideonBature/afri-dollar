@@ -21,6 +21,7 @@ model User {
   lastName      String?
   isVerified    Boolean   @default(false)
   isActive      Boolean   @default(true)
+  role          String    @default("user")
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 

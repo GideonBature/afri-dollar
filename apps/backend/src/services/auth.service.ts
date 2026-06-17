@@ -130,7 +130,7 @@ export const AuthService = {
     const jwtPayload: Omit<JwtPayload, 'iat' | 'exp'> = {
       userId: user.id,
       email: user.email,
-      role: 'user',
+      role: user.role,
     };
 
     const accessToken = this.generateAccessToken(jwtPayload);
@@ -186,7 +186,7 @@ export const AuthService = {
     const jwtPayload: Omit<JwtPayload, 'iat' | 'exp'> = {
       userId: user.id,
       email: user.email,
-      role: 'user',
+      role: user.role,
     };
 
     const accessToken = this.generateAccessToken(jwtPayload);
@@ -259,7 +259,7 @@ export const AuthService = {
     const jwtPayload: Omit<JwtPayload, 'iat' | 'exp'> = {
       userId: payload.userId,
       email: payload.email,
-      role: payload.role || 'user',
+      role: tokenRecord.user.role,
     };
 
     const accessToken = this.generateAccessToken(jwtPayload);
