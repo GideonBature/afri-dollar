@@ -1,43 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
 
-export class AppError extends Error {
-  statusCode: number;
-  code: string;
-  isOperational: boolean;
-
-  constructor(message: string, statusCode: number, code: string) {
-    super(message);
-    this.statusCode = statusCode;
-    this.code = code;
-    this.isOperational = true;
-    Object.setPrototypeOf(this, new.target.prototype);
-  }
-}
-
-export class AuthenticationError extends AppError {
-  constructor(message = 'Authentication failed', code = 'AUTH_001') {
-    super(message, 401, code);
-  }
-}
-
-export class AuthorizationError extends AppError {
-  constructor(message = 'Access denied', code = 'AUTH_001') {
-    super(message, 403, code);
-  }
-}
-
-export class NotFoundError extends AppError {
-  constructor(message = 'Resource not found', code = 'WALLET_001') {
-    super(message, 404, code);
-  }
-}
-
-export class ValidationError extends AppError {
-  constructor(message = 'Validation failed', code = 'TXN_002') {
-    super(message, 422, code);
-  }
-}
-
 export const ERROR_CODES = {
   AUTH_001: 'Invalid credentials',
   AUTH_002: 'Token expired',
@@ -52,6 +14,44 @@ export const ERROR_CODES = {
 } as const;
 
 export type ErrorCode = keyof typeof ERROR_CODES;
+
+export class AppError extends Error {
+  statusCode: number;
+  code: ErrorCode;
+  isOperational: boolean;
+
+  constructor(message: string, statusCode: number, code: ErrorCode) {
+    super(message);
+    this.statusCode = statusCode;
+    this.code = code;
+    this.isOperational = true;
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+
+export class AuthenticationError extends AppError {
+  constructor(message = 'Authentication failed', code: ErrorCode = 'AUTH_001') {
+    super(message, 401, code);
+  }
+}
+
+export class AuthorizationError extends AppError {
+  constructor(message = 'Access denied', code: ErrorCode = 'AUTH_003') {
+    super(message, 403, code);
+  }
+}
+
+export class NotFoundError extends AppError {
+  constructor(message = 'Resource not found', code: ErrorCode = 'WALLET_001') {
+    super(message, 404, code);
+  }
+}
+
+export class ValidationError extends AppError {
+  constructor(message = 'Validation failed', code: ErrorCode = 'TXN_002') {
+    super(message, 422, code);
+  }
+}
 
 export function errorMiddleware(
   err: Error,

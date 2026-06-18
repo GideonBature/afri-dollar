@@ -47,22 +47,33 @@ describe('Error Classes', () => {
     expect(err instanceof Error).toBe(true);
   });
 
-  it('AuthenticationError defaults to 401', () => {
+  it('AuthenticationError defaults to 401 / AUTH_001', () => {
     const err = new AuthenticationError();
     expect(err.statusCode).toBe(401);
+    expect(err.code).toBe('AUTH_001');
+    expect(err.message).toBe('Authentication failed');
     expect(err instanceof AppError).toBe(true);
   });
 
-  it('AuthorizationError defaults to 403', () => {
-    expect(new AuthorizationError().statusCode).toBe(403);
+  it('AuthorizationError defaults to 403 / AUTH_003', () => {
+    const err = new AuthorizationError();
+    expect(err.statusCode).toBe(403);
+    expect(err.code).toBe('AUTH_003');
+    expect(err.message).toBe('Access denied');
   });
 
-  it('NotFoundError defaults to 404', () => {
-    expect(new NotFoundError().statusCode).toBe(404);
+  it('NotFoundError defaults to 404 / WALLET_001', () => {
+    const err = new NotFoundError();
+    expect(err.statusCode).toBe(404);
+    expect(err.code).toBe('WALLET_001');
+    expect(err.message).toBe('Resource not found');
   });
 
-  it('ValidationError defaults to 422', () => {
-    expect(new ValidationError().statusCode).toBe(422);
+  it('ValidationError defaults to 422 / TXN_002', () => {
+    const err = new ValidationError();
+    expect(err.statusCode).toBe(422);
+    expect(err.code).toBe('TXN_002');
+    expect(err.message).toBe('Validation failed');
   });
 });
 
