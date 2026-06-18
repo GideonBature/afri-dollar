@@ -30,7 +30,8 @@ export interface AuthRequest extends Request {
 }
 
 /**
- * Auth Middleware
+ * Auth Middleware (also exported as authenticate)
+ * Verifies JWT token and attaches user to request
  * Handles authentication and authorization for routes
  */
 export const authMiddleware = (req: AuthRequest, res: Response, next: NextFunction): void => {
@@ -64,6 +65,9 @@ export const authMiddleware = (req: AuthRequest, res: Response, next: NextFuncti
     });
   }
 };
+
+// Export authMiddleware as authenticate to match issue #8 requirements
+export const authenticate = authMiddleware;
 
 /**
  * Admin Middleware
