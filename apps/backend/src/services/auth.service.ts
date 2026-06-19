@@ -175,7 +175,7 @@ export const AuthService = {
       include: { user: true },
     });
 
-    // Reuse detection: token was already revoked — potential theft; revoke all tokens for this user
+    // Reuse detection: revoked token re-used — potential theft; revoke all active sessions
     if (tokenRecord && tokenRecord.isRevoked) {
       await prisma.refreshToken.updateMany({
         where: { userId: tokenRecord.userId, isRevoked: false },
