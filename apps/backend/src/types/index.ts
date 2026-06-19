@@ -1,6 +1,7 @@
 import type { User } from '@prisma/client';
 
 export * from './auth.types';
+export * from './wallet.types';
 
 export type RegisterRequest = {
   email: string;

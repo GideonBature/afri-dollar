@@ -11,6 +11,7 @@ import authRouter from './routes/auth.routes';
 import fxRouter from './routes/fx.routes';
 import payrollRouter from './routes/payroll.routes';
 import treasuryRouter from './routes/treasury.routes';
+import walletRouter from './routes/wallet.routes';
 // Load backend-level .env file
 config({ path: path.resolve(__dirname, '../.env') });
 
@@ -55,6 +56,10 @@ app.use('/api/v1/payroll', payrollRouter);
 // Treasury routes (admin only)
 // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
 app.use('/api/v1/treasury', treasuryRouter);
+
+// Wallet routes
+// eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+app.use('/api/v1/wallet', walletRouter);
 
 // Global error handler
 app.use(errorMiddleware);

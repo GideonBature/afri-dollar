@@ -15,6 +15,7 @@ export const registerSchema = z.object({
 
 export const createWalletSchema = z.object({
   walletType: z.enum(['business', 'treasury', 'payroll']),
+  network: z.enum(['testnet', 'mainnet']).optional().default('testnet'),
 });
 
 export const createPaymentSchema = z.object({
