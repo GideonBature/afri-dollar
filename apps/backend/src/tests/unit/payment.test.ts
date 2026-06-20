@@ -24,8 +24,8 @@ jest.mock('@stellar/stellar-sdk', () => {
   };
 });
 
-const mockLoadAccount = (global as Record<string, unknown>).__mockLoadAccount as jest.Mock;
-const mockSubmitTransaction = (global as Record<string, unknown>)
+const _mockLoadAccount = (global as Record<string, unknown>).__mockLoadAccount as jest.Mock;
+const _mockSubmitTransaction = (global as Record<string, unknown>)
   .__mockSubmitTransaction as jest.Mock;
 
 jest.mock('../../config/database', () => ({
@@ -66,7 +66,6 @@ describe('PaymentService', () => {
   const mockPublicKey = testKeypair.publicKey();
   const mockSecretKey = testKeypair.secret();
   let mockSecretEncrypted: string;
-  const mockAssetIssuer = Keypair.random().publicKey();
   const mockDestination = Keypair.random().publicKey();
 
   let originalEncryptionKey: string | undefined;
