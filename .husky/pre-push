@@ -16,6 +16,56 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 
+# Tests
+echo "▸ Running tests..."
+npm run test
+if [ $? -ne 0 ]; then
+  echo "❌ Tests failed. Please fix test failures before pushing."
+  exit 1
+fi
+
+# Security audit
+echo "▸ Running security audit..."
+npm audit --audit-level=high
+if [ $? -ne 0 ]; then
+  echo "⚠️  Security audit found high severity vulnerabilities."
+  echo "   Please review and fix when possible. Run 'npm audit' for details."
+  echo "   Continuing with push (security audit is non-blocking)."
+fi
+
+# File size check
+echo "▸ Checking for large files..."
+MAX_SIZE_KB=500
+LARGE_FILES=$(find . -type f -not -path "./node_modules/*" -not -path "./.git/*" -not -path "./dist/*" -not -path "./.next/*" -not -name "package-lock.json" -size +${MAX_SIZE_KB}k)
+if [ -n "$LARGE_FILES" ]; then
+  echo "❌ Found files larger than ${MAX_SIZE_KB}KB:"
+  echo "$LARGE_FILES"
+  echo "   Please reduce file sizes or add them to .gitignore if they shouldn't be committed."
+  exit 1
+fi
+
+# Dependency check
+echo "▸ Checking for unused dependencies..."
+if command -v depcheck &> /dev/null; then
+  npx depcheck
+  if [ $? -ne 0 ]; then
+    echo "⚠️  Dependency check found unused dependencies."
+    echo "   Please review and remove unused dependencies when possible."
+    echo "   Continuing with push (dependency check is non-blocking)."
+  fi
+else
+  echo "⚠️  depcheck not installed. Skipping dependency check."
+  echo "   Install it with: npm install -g depcheck"
+fi
+
+# Duplicate code check
+echo "▸ Checking for duplicate code..."
+npx jscpd ./apps ./packages --threshold 5 --ignore "node_modules,dist,.next,coverage"
+if [ $? -ne 0 ]; then
+  echo "❌ Found duplicate code. Please refactor to reduce code duplication."
+  exit 1
+fi
+
 # Build
 echo "▸ Building project..."
 npm run build
