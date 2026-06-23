@@ -15,7 +15,7 @@ import prisma from './config/database';
 import { errorMiddleware } from './middleware/error.middleware';
 import auditRouter from './routes/audit.routes';
 import authRouter from './routes/auth.routes';
-import fxRouter from './routes/fx.routes';
+import fxRouter, { adminFxRouter } from './routes/fx.routes';
 import paymentRouter from './routes/payment.routes';
 import payrollRouter from './routes/payroll.routes';
 import stellarRouter from './routes/stellar.routes';
@@ -59,6 +59,9 @@ app.use('/api/v1/fx', fxRouter as MountableRouter);
 
 // Payment routes
 app.use('/api/v1/payments', paymentRouter as MountableRouter);
+
+// Admin FX routes
+app.use('/api/v1/admin/fx', adminFxRouter as MountableRouter);
 
 // Payroll routes
 app.use('/api/v1/payroll', payrollRouter as MountableRouter);

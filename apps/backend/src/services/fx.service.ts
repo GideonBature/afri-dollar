@@ -687,22 +687,111 @@ export const FXService = {
 
   async getConversionHistory(
     userId: string,
-    walletId?: string,
-    limit: number = 50
+    options?: {
+      walletId?: string;
+      limit?: number;
+      cursor?: string;
+      fromDate?: string;
+      toDate?: string;
+    }
   ): Promise<FXHistoryItem[]> {
-    const take = Math.min(Math.max(limit, 1), MAX_HISTORY_LIMIT);
+    const limit = Math.min(Math.max(options?.limit || 50, 1), MAX_HISTORY_LIMIT);
+
+    const where: Record<string, unknown> = {
+      userId,
+      type: 'exchange',
+    };
+
+    if (options?.walletId) {
+      where.walletId = options.walletId;
+    }
+
+    if (options?.fromDate || options?.toDate) {
+      const createdAtFilter: Record<string, Date> = {};
+      if (options?.fromDate) {
+        createdAtFilter.gte = new Date(options.fromDate);
+      }
+      if (options?.toDate) {
+        createdAtFilter.lte = new Date(options.toDate);
+      }
+      where.createdAt = createdAtFilter;
+    }
+
     const transactions = await prisma.transaction.findMany({
-      where: {
-        userId,
-        type: 'exchange',
-        ...(walletId ? { walletId } : {}),
-      },
-      orderBy: {
-        createdAt: 'desc',
-      },
-      take,
+      where,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: limit,
+      ...(options?.cursor ? { cursor: { id: options.cursor }, skip: 1 } : {}),
     });
 
     return transactions.map(mapHistoryItem);
+  },
+
+  async upsertRate(data: { fromAsset: string; toAsset: string; rate: string }): Promise<FXRate> {
+    const fromAsset = normaliseAsset(data.fromAsset);
+    const toAsset = normaliseAsset(data.toAsset);
+
+    if (fromAsset === toAsset) {
+      throw new Error('From and to assets must be different');
+    }
+
+    const rate = normaliseNumericString(data.rate, DEFAULT_RATE_PRECISION);
+    const validFrom = new Date();
+
+    const newRate = await prisma.$transaction(
+      async (client) => {
+        await client.exchangeRate.updateMany({
+          where: {
+            fromAsset,
+            toAsset,
+            isActive: true,
+          },
+          data: {
+            isActive: false,
+            validUntil: validFrom,
+          },
+        });
+
+        return client.exchangeRate.create({
+          data: {
+            fromAsset,
+            toAsset,
+            rate,
+            source: 'manual',
+            isActive: true,
+            validFrom,
+          },
+        });
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+    );
+
+    if (!newRate) {
+      throw new Error('Failed to create exchange rate');
+    }
+
+    return mapRateDefinition(newRate);
+  },
+
+  async deactivateRate(id: string): Promise<void> {
+    const rate = await prisma.exchangeRate.findUnique({
+      where: { id },
+    });
+
+    if (!rate) {
+      throw new Error('Exchange rate not found');
+    }
+
+    if (!rate.isActive) {
+      throw new Error('Exchange rate is already inactive');
+    }
+
+    await prisma.exchangeRate.update({
+      where: { id },
+      data: {
+        isActive: false,
+        validUntil: new Date(),
+      },
+    });
   },
 };
