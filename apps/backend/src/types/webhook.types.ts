@@ -4,7 +4,8 @@ export type WebhookEvent =
   | 'wallet.created'
   | 'payroll.processed'
   | 'kyc.approved'
-  | 'kyc.rejected';
+  | 'kyc.rejected'
+  | 'sep24.transaction.status_update';
 
 export const WEBHOOK_EVENTS: WebhookEvent[] = [
   'transaction.completed',
@@ -13,6 +14,7 @@ export const WEBHOOK_EVENTS: WebhookEvent[] = [
   'payroll.processed',
   'kyc.approved',
   'kyc.rejected',
+  'sep24.transaction.status_update',
 ];
 
 export interface WebhookConfigResponse {

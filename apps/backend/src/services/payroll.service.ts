@@ -1,15 +1,8 @@
 import { PayrollBatch, PayrollItem as DbPayrollItem, Prisma } from '@afri-dollar/database';
-import {
-  Keypair,
-  Networks,
-  Operation,
-  TransactionBuilder,
-  Asset,
-  Memo,
-  StrKey,
-} from '@stellar/stellar-sdk';
+import { Keypair, Operation, TransactionBuilder, Asset, Memo, StrKey } from '@stellar/stellar-sdk';
 
 import prisma from '../config/database';
+import { getNetworkPassphrase } from '../config/stellar-network';
 import { decrypt } from '../utils/crypto';
 
 import { NotificationService } from './notification.service';
@@ -386,6 +379,8 @@ export const PayrollService = {
       throw new Error('Only approved batches can be processed');
     }
 
+    const networkPassphrase = getNetworkPassphrase();
+
     // Atomically transition status to processing to prevent double-processing
     const updateCount = await prisma.payrollBatch.updateMany({
       where: { id: batchId, status: 'approved' },
@@ -432,8 +427,6 @@ export const PayrollService = {
     }
 
     const sourceKeypair = Keypair.fromSecret(decryptedSecretKey);
-    const networkPassphrase =
-      process.env.STELLAR_NETWORK === 'mainnet' ? Networks.PUBLIC : Networks.TESTNET;
 
     // Transition all selected items to processing status
     await prisma.payrollItem.updateMany({
