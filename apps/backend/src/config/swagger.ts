@@ -95,6 +95,8 @@ const swaggerOptions: Options = {
             memo: { type: 'string', maxLength: 28 },
             memo_type: { type: 'string' },
             lang: { type: 'string' },
+          },
+        },
         Pagination: {
           type: 'object',
           properties: {

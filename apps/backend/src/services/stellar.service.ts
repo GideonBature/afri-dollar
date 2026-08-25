@@ -1,5 +1,6 @@
 import {
   Asset,
+  Config,
   Horizon,
   Keypair,
   Memo,
@@ -7,7 +8,6 @@ import {
   StrKey,
   TransactionBuilder,
 } from '@stellar/stellar-sdk';
-import { Config, Horizon, StrKey } from '@stellar/stellar-sdk';
 
 import {
   getDefaultHorizonUrl,
@@ -24,6 +24,7 @@ function getHorizonServerInstance(): Horizon.Server {
   }
   return horizonServer;
 }
+
 /**
  * Finite timeout for general Horizon requests (loadAccount, fetchBaseFee,
  * status lookups). Transaction submission keeps the SDK's own hardcoded
@@ -31,8 +32,6 @@ function getHorizonServerInstance(): Horizon.Server {
  */
 const HORIZON_REQUEST_TIMEOUT_MS = 15_000;
 Config.setTimeout(HORIZON_REQUEST_TIMEOUT_MS);
-
-const horizonServer = new Horizon.Server(HORIZON_URL);
 
 const FRIENDBOT_URL = 'https://friendbot.stellar.org';
 const FRIENDBOT_TIMEOUT_MS = 30_000;
