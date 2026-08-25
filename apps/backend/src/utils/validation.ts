@@ -27,6 +27,26 @@ export const createWalletSchema = z.object({
   network: z.enum(['testnet', 'mainnet']).optional().default('testnet'),
 });
 
+export const listWalletsSchema = z.object({
+  walletType: z.enum(['business', 'treasury', 'payroll']).optional(),
+  network: z.enum(['testnet', 'mainnet']).optional(),
+  page: z.coerce.number().int().min(1).optional().default(1),
+  limit: z.coerce.number().int().min(1).max(100).optional().default(20),
+});
+
+export const walletIdParamSchema = z.object({
+  id: z.string().min(1, 'Wallet ID is required'),
+});
+
+export const walletTransactionsQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(200).optional().default(20),
+  cursor: z.string().optional(),
+});
+
+export const deleteWalletSchema = z.object({
+  password: z.string().min(1, 'Password is required for confirmation'),
+});
+
 export const createPaymentSchema = z.object({
   toAddress: z.string().length(56, 'Invalid Stellar address'),
   amount: z.string().regex(/^\d+(\.\d+)?$/, 'Invalid amount format'),

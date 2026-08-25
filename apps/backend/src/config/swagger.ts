@@ -78,6 +78,15 @@ const swaggerOptions: Options = {
             },
           },
         },
+        Pagination: {
+          type: 'object',
+          properties: {
+            total: { type: 'integer', example: 10 },
+            page: { type: 'integer', example: 1 },
+            limit: { type: 'integer', example: 20 },
+            totalPages: { type: 'integer', example: 1 },
+          },
+        },
         WebhookConfig: {
           type: 'object',
           properties: {
@@ -1434,7 +1443,7 @@ const swaggerOptions: Options = {
       },
 
       // ─── Wallet ─────────────────────────────────────────────────────
-      '/api/v1/wallet/create': {
+      '/api/v1/wallet': {
         post: {
           tags: ['Wallet'],
           summary: 'Create Stellar wallet',
@@ -1481,6 +1490,266 @@ const swaggerOptions: Options = {
             },
             '400': { description: 'Validation error' },
             '401': { description: 'Unauthorized' },
+          },
+        },
+        get: {
+          tags: ['Wallet'],
+          summary: 'List user wallets',
+          description: 'Returns all active wallets for the authenticated user',
+          operationId: 'listWallets',
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            {
+              name: 'walletType',
+              in: 'query',
+              schema: { type: 'string', enum: ['business', 'treasury', 'payroll'] },
+            },
+            {
+              name: 'network',
+              in: 'query',
+              schema: { type: 'string', enum: ['testnet', 'mainnet'] },
+            },
+            {
+              name: 'page',
+              in: 'query',
+              schema: { type: 'integer', default: 1, minimum: 1 },
+            },
+            {
+              name: 'limit',
+              in: 'query',
+              schema: { type: 'integer', default: 20, minimum: 1, maximum: 100 },
+            },
+          ],
+          responses: {
+            '200': {
+              description: 'List of wallets',
+              content: {
+                'application/json': {
+                  schema: {
+                    allOf: [
+                      { $ref: '#/components/schemas/SuccessResponse' },
+                      {
+                        type: 'object',
+                        properties: {
+                          data: { type: 'array', items: { type: 'object' } },
+                          pagination: { $ref: '#/components/schemas/Pagination' },
+                        },
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+            '401': { description: 'Unauthorized' },
+          },
+        },
+      },
+      '/api/v1/wallet/create': {
+        post: {
+          tags: ['Wallet'],
+          summary: 'Create Stellar wallet (legacy route)',
+          description: 'Creates a new Stellar wallet for the authenticated user',
+          operationId: 'createWalletLegacy',
+          security: [{ bearerAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['walletType'],
+                  properties: {
+                    walletType: {
+                      type: 'string',
+                      enum: ['business', 'treasury', 'payroll'],
+                      example: 'business',
+                    },
+                    network: {
+                      type: 'string',
+                      enum: ['testnet', 'mainnet'],
+                      default: 'testnet',
+                      example: 'testnet',
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            '201': {
+              description: 'Wallet created',
+              content: {
+                'application/json': {
+                  schema: {
+                    allOf: [
+                      { $ref: '#/components/schemas/SuccessResponse' },
+                      { type: 'object', properties: { data: { type: 'object' } } },
+                    ],
+                  },
+                },
+              },
+            },
+            '400': { description: 'Validation error' },
+            '401': { description: 'Unauthorized' },
+          },
+        },
+      },
+      '/api/v1/wallet/{id}': {
+        get: {
+          tags: ['Wallet'],
+          summary: 'Get wallet by ID',
+          description: 'Returns single wallet metadata and last-known balance',
+          operationId: 'getWalletById',
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            {
+              name: 'id',
+              in: 'path',
+              required: true,
+              schema: { type: 'string' },
+            },
+          ],
+          responses: {
+            '200': { description: 'Wallet details' },
+            '401': {
+              description: 'Unauthorized',
+              content: {
+                'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+              },
+            },
+            '404': {
+              description: 'Wallet not found',
+              content: {
+                'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+              },
+            },
+          },
+        },
+        delete: {
+          tags: ['Wallet'],
+          summary: 'Delete / Archive wallet',
+          description: 'Soft-deletes a wallet after checking zero balance on Stellar Horizon',
+          operationId: 'deleteWallet',
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            {
+              name: 'id',
+              in: 'path',
+              required: true,
+              schema: { type: 'string' },
+            },
+          ],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['password'],
+                  properties: {
+                    password: { type: 'string', description: 'User password for confirmation' },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            '200': { description: 'Wallet archived successfully' },
+            '400': {
+              description: 'Invalid confirmation or wallet has non-zero balance',
+              content: {
+                'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+              },
+            },
+            '401': {
+              description: 'Unauthorized',
+              content: {
+                'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+              },
+            },
+            '404': {
+              description: 'Wallet not found',
+              content: {
+                'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+              },
+            },
+            '502': { description: 'Failed to verify wallet balance on Stellar Horizon' },
+          },
+        },
+      },
+      '/api/v1/wallet/{id}/balances': {
+        get: {
+          tags: ['Wallet'],
+          summary: 'Get real-time wallet balances',
+          description: 'Fetches real-time balances from Stellar Horizon (cached for 30 seconds)',
+          operationId: 'getWalletBalances',
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            {
+              name: 'id',
+              in: 'path',
+              required: true,
+              schema: { type: 'string' },
+            },
+          ],
+          responses: {
+            '200': { description: 'Array of wallet balances' },
+            '401': {
+              description: 'Unauthorized',
+              content: {
+                'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+              },
+            },
+            '404': {
+              description: 'Wallet not found',
+              content: {
+                'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+              },
+            },
+            '502': { description: 'Failed to fetch balances from Stellar Horizon' },
+          },
+        },
+      },
+      '/api/v1/wallet/{id}/transactions': {
+        get: {
+          tags: ['Wallet'],
+          summary: 'Get wallet transactions',
+          description: 'Fetches paginated transaction history from Stellar Horizon',
+          operationId: 'getWalletTransactions',
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            {
+              name: 'id',
+              in: 'path',
+              required: true,
+              schema: { type: 'string' },
+            },
+            {
+              name: 'limit',
+              in: 'query',
+              schema: { type: 'integer', default: 20, minimum: 1, maximum: 200 },
+            },
+            {
+              name: 'cursor',
+              in: 'query',
+              schema: { type: 'string' },
+            },
+          ],
+          responses: {
+            '200': { description: 'Array of transaction records' },
+            '401': {
+              description: 'Unauthorized',
+              content: {
+                'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+              },
+            },
+            '404': {
+              description: 'Wallet not found',
+              content: {
+                'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+              },
+            },
+            '502': { description: 'Failed to fetch transactions from Stellar Horizon' },
           },
         },
       },
@@ -2556,6 +2825,7 @@ const swaggerOptions: Options = {
                           'transaction.completed',
                           'transaction.failed',
                           'wallet.created',
+                          'wallet.archived',
                           'payroll.processed',
                           'kyc.approved',
                           'kyc.rejected',
