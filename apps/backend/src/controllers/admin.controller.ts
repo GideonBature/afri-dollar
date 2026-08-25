@@ -1,10 +1,16 @@
 import type { Response } from 'express';
 import { z } from 'zod';
 
+import { env } from '../config/env';
 import type { AuthRequest } from '../middleware/auth.middleware';
 import { AdminService } from '../services/admin.service';
+import { TransactionService } from '../services/transaction.service';
 import { AppError } from '../types';
-import { queryBooleanSchema } from '../utils/validation';
+import {
+  adminBatchPayoutSchema,
+  queryBooleanSchema,
+  transactionStatusFilter,
+} from '../utils/validation';
 
 const paginationSchema = z.object({
   page: z.coerce.number().int().positive().default(1),
@@ -27,7 +33,9 @@ const updateUserStatusSchema = z.object({
 });
 
 const listTransactionsQuerySchema = paginationSchema.extend({
-  status: z.string().optional(),
+  // Validated against the shared payment-status enum (includes the legacy
+  // pending/completed/cancelled values stored on Transaction rows).
+  status: transactionStatusFilter.optional(),
   type: z.string().optional(),
   userId: z.string().optional(),
   assetCode: z.string().optional(),
@@ -248,6 +256,54 @@ export const AdminController = {
       );
 
       res.status(200).json({ success: true, data: transaction });
+    } catch (error) {
+      handleError(res, error);
+    }
+  },
+
+  /** Force-rebuild + resubmit a failed payment (admin override). */
+  async rebuildTransaction(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const adminUserId = requireUser(req, res);
+      if (!adminUserId) return;
+
+      const { id } = userIdParamSchema.parse(req.params);
+      const result = await TransactionService.rebuildFailedTransaction(id, adminUserId);
+
+      res.status(200).json({ success: true, data: result });
+    } catch (error) {
+      handleError(res, error);
+    }
+  },
+
+  /**
+   * Treasury → hot-wallet batched payouts. Each payout is an independent
+   * Stellar transaction; one failure does not stop the rest.
+   */
+  async batchPayouts(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const adminUserId = requireUser(req, res);
+      if (!adminUserId) return;
+
+      const body = adminBatchPayoutSchema.parse(req.body);
+      const sourceWalletId = body.sourceWalletId || env.TREASURY_WALLET_ID;
+      // Defense in depth: the service enforces this too — an admin must not
+      // be able to fund payouts from an arbitrary end-user wallet.
+      if (!sourceWalletId) {
+        throw new AppError(400, 'Source wallet ID is required');
+      }
+      if (body.sourceWalletId && body.sourceWalletId !== env.TREASURY_WALLET_ID) {
+        throw new AppError(403, 'Source wallet must be the configured treasury wallet');
+      }
+
+      const result = await TransactionService.executeBatchPayouts({
+        sourceWalletId,
+        payouts: body.payouts,
+        adminUserId,
+      });
+
+      // The batch completes before responding, so 200 (not 202).
+      res.status(200).json({ success: true, data: result });
     } catch (error) {
       handleError(res, error);
     }

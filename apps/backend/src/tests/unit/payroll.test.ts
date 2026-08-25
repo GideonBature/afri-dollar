@@ -59,6 +59,7 @@ jest.mock('../../config/database', () => ({
       create: jest.fn(),
       update: jest.fn(),
       updateMany: jest.fn(),
+      findMany: jest.fn(),
     },
     auditLog: {
       create: jest.fn(),
@@ -76,6 +77,7 @@ const mockPayrollBatchUpdateMany = prisma.payrollBatch.updateMany as jest.Mock;
 const mockPayrollItemCreate = prisma.payrollItem.create as jest.Mock;
 const mockPayrollItemUpdate = prisma.payrollItem.update as jest.Mock;
 const mockPayrollItemUpdateMany = prisma.payrollItem.updateMany as jest.Mock;
+const mockPayrollItemFindMany = prisma.payrollItem.findMany as jest.Mock;
 const mockAuditLogCreate = prisma.auditLog.create as jest.Mock;
 
 describe('PayrollService', () => {
@@ -612,6 +614,15 @@ describe('PayrollService', () => {
           },
         ],
       };
+      // Default: the conditional claim claims every snapshot item.
+      mockPayrollItemFindMany.mockImplementation(({ where }: any) => {
+        const ids = where?.id?.in ?? [];
+        return Promise.resolve(
+          mockBatch.items
+            .filter((i: any) => ids.includes(i.id))
+            .map((i: any) => ({ ...i, status: 'processing' }))
+        );
+      });
     });
 
     it('should throw an error if the batch belongs to another user', async () => {
@@ -719,8 +730,11 @@ describe('PayrollService', () => {
       const dummyAccount = new Account(mockPublicKey, '100');
       mockLoadAccount.mockResolvedValue(dummyAccount);
 
-      // First call (batch) fails
-      mockSubmitTransaction.mockRejectedValueOnce(new Error('Batch failed'));
+      // First call (batch) fails deterministically (Horizon rejected the tx,
+      // so nothing landed and per-item retry is safe)
+      const batchError = new Error('Batch failed') as Error & { response: unknown };
+      batchError.response = { status: 400 };
+      mockSubmitTransaction.mockRejectedValueOnce(batchError);
       // Second call (item 1 single retry) succeeds
       mockSubmitTransaction.mockResolvedValueOnce({ hash: 'tx-single-1' });
       // Third call (item 2 single retry) fails
@@ -745,6 +759,104 @@ describe('PayrollService', () => {
       expect(result.items[0].status).toBe('completed');
       expect(result.items[1].status).toBe('failed');
       consoleWarnSpy.mockRestore();
+    });
+
+    it('does not resubmit the chunk after an indeterminate submission failure', async () => {
+      const consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+      mockPayrollBatchFindUnique.mockResolvedValue(mockBatch);
+      mockPayrollBatchUpdateMany.mockResolvedValue({ count: 1 });
+      mockPayrollBatchUpdate.mockResolvedValue({
+        ...mockBatch,
+        status: 'failed',
+        items: mockBatch.items.map((i: any) => ({ ...i, status: 'failed' })),
+      });
+      mockPayrollItemUpdate.mockImplementation(({ where, data }: any) => ({
+        ...mockBatch.items.find((i: any) => i.id === where.id),
+        ...data,
+      }));
+
+      const dummyAccount = new Account(mockPublicKey, '100');
+      mockLoadAccount.mockResolvedValue(dummyAccount);
+      // Timeout-style rejection: no `response` → outcome unknown on-chain.
+      mockSubmitTransaction.mockRejectedValue(new Error('Network timeout'));
+
+      const result = await PayrollService.processPayrollBatch('batch-123', mockUserId);
+
+      // The chunk is submitted exactly once — never retried blindly.
+      expect(mockSubmitTransaction).toHaveBeenCalledTimes(1);
+      expect(result.successful).toBe(0);
+      expect(result.failed).toBe(2);
+      // Both items record the attempted hash for later reconciliation.
+      expect(mockPayrollItemUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'item-1' },
+          data: expect.objectContaining({
+            status: 'failed',
+            errorMessage: expect.stringContaining('SUBMISSION_TIMEOUT:'),
+          }),
+        })
+      );
+      const firstCall = mockPayrollItemUpdate.mock.calls[0][0];
+      expect(firstCall.data.stellarTxId).toMatch(/^[0-9a-f]{64}$/);
+      consoleWarnSpy.mockRestore();
+    });
+
+    it('treats a Horizon 504 gateway timeout as indeterminate and does not resubmit', async () => {
+      mockPayrollBatchFindUnique.mockResolvedValue(mockBatch);
+      mockPayrollBatchUpdateMany.mockResolvedValue({ count: 1 });
+      mockPayrollBatchUpdate.mockResolvedValue({
+        ...mockBatch,
+        status: 'failed',
+        items: mockBatch.items.map((i: any) => ({ ...i, status: 'failed' })),
+      });
+      mockPayrollItemUpdate.mockImplementation(({ where, data }: any) => ({
+        ...mockBatch.items.find((i: any) => i.id === where.id),
+        ...data,
+      }));
+
+      const dummyAccount = new Account(mockPublicKey, '100');
+      mockLoadAccount.mockResolvedValue(dummyAccount);
+      const gatewayTimeout = new Error('Gateway timeout') as Error & { response: unknown };
+      gatewayTimeout.response = { status: 504 };
+      mockSubmitTransaction.mockRejectedValue(gatewayTimeout);
+
+      const result = await PayrollService.processPayrollBatch('batch-123', mockUserId);
+
+      // 504 means the outcome is unknown — the chunk must never be retried.
+      expect(mockSubmitTransaction).toHaveBeenCalledTimes(1);
+      expect(result.successful).toBe(0);
+      expect(result.failed).toBe(2);
+    });
+
+    it('excludes items completed concurrently between snapshot and claim', async () => {
+      mockPayrollBatchFindUnique.mockResolvedValue(mockBatch);
+      mockPayrollBatchUpdateMany.mockResolvedValue({ count: 1 });
+      // The conditional item claim only wins for item-1: payPayrollItem
+      // completed item-2 while this batch run was starting.
+      mockPayrollItemUpdateMany.mockResolvedValue({ count: 1 });
+      mockPayrollItemFindMany.mockResolvedValue([{ ...mockBatch.items[0], status: 'processing' }]);
+      mockPayrollBatchUpdate.mockResolvedValue({
+        ...mockBatch,
+        status: 'completed',
+        items: [{ ...mockBatch.items[0], status: 'completed', stellarTxId: 'tx-hash-1' }],
+      });
+      mockPayrollItemUpdate.mockImplementation(({ where, data }: any) => ({
+        ...mockBatch.items.find((i: any) => i.id === where.id),
+        ...data,
+      }));
+
+      const dummyAccount = new Account(mockPublicKey, '100');
+      mockLoadAccount.mockResolvedValue(dummyAccount);
+      mockSubmitTransaction.mockResolvedValue({ hash: 'tx-hash-1' });
+
+      const result = await PayrollService.processPayrollBatch('batch-123', mockUserId);
+
+      // Only the claimed item is submitted and reported.
+      expect(mockSubmitTransaction).toHaveBeenCalledTimes(1);
+      expect(result.total).toBe(1);
+      expect(result.successful).toBe(1);
+      expect(result.failed).toBe(0);
     });
 
     it('should throw an error if the batch is already being processed', async () => {

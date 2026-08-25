@@ -2,6 +2,7 @@ export type WebhookEvent =
   | 'transaction.completed'
   | 'transaction.failed'
   | 'wallet.created'
+  | 'wallet.archived'
   | 'payroll.processed'
   | 'kyc.approved'
   | 'kyc.rejected'
@@ -11,6 +12,7 @@ export const WEBHOOK_EVENTS: WebhookEvent[] = [
   'transaction.completed',
   'transaction.failed',
   'wallet.created',
+  'wallet.archived',
   'payroll.processed',
   'kyc.approved',
   'kyc.rejected',

@@ -10,6 +10,7 @@ export * from './admin.types';
 export * from './notification.types';
 export * from './compliance.types';
 export * from './sep.types';
+export * from './transaction.types';
 
 export type RegisterRequest = {
   email: string;
@@ -60,10 +61,13 @@ export type UserResponse = {
 
 export class AppError extends Error {
   status: number;
+  /** Optional machine-readable error code (e.g. INSUFFICIENT_BALANCE). */
+  code?: string;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, code?: string) {
     super(message);
     this.status = status;
+    this.code = code;
     this.name = 'AppError';
   }
 }

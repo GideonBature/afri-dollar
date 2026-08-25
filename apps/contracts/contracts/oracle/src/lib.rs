@@ -343,6 +343,11 @@ impl OracleContract {
         Ok(())
     }
 
+    /// Mean of fresh prices from authorized, active providers (not a median).
+    ///
+    /// Unauthorized, inactive, or stale quotes are skipped. All contributing
+    /// quotes must share the same `decimals` (`DecimalMismatch` otherwise).
+    /// The mean is `sum / count` using integer division, truncated toward zero.
     pub fn get_aggregated_price(
         env: Env,
         asset_a: Address,
@@ -407,3 +412,6 @@ impl OracleContract {
         Ok(config.authorized && is_active(env.ledger().timestamp(), &config))
     }
 }
+
+#[cfg(test)]
+mod test;

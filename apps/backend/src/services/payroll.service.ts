@@ -7,6 +7,7 @@ import { decrypt } from '../utils/crypto';
 
 import { NotificationService } from './notification.service';
 import { StellarService } from './stellar.service';
+import { TransactionService } from './transaction.service';
 import { WebhookService } from './webhook.service';
 
 export interface CreatePayrollBatchOptions {
@@ -268,6 +269,203 @@ export const PayrollService = {
   },
 
   /**
+   * Executes a single approved payroll item on Stellar via
+   * TransactionService (build → sign → submit → track). The batch must be
+   * approved or already processing; an approved batch is atomically advanced
+   * to `processing` so processPayrollBatch cannot claim it concurrently.
+   * The item is atomically claimed before funds move so concurrent workers
+   * cannot double-pay, and a failed item is only re-paid after Horizon
+   * confirms its previous attempt did not land.
+   */
+  async payPayrollItem(batchId: string, itemId: string, userId: string): Promise<PayrollItem> {
+    const batch = await assertBatchOwnedByUser(batchId, userId);
+    if (batch.status !== 'approved' && batch.status !== 'processing') {
+      throw new Error('Payroll batch must be approved before items can be paid');
+    }
+
+    // Advance an approved batch to processing (atomic no-op if another
+    // worker already did) so the batch processor cannot double-claim it.
+    await prisma.payrollBatch.updateMany({
+      where: { id: batchId, status: 'approved' },
+      data: { status: 'processing' },
+    });
+
+    const item = await prisma.payrollItem.findFirst({
+      where: { id: itemId, payrollBatchId: batchId },
+    });
+    if (!item) {
+      throw new Error('Payroll item not found');
+    }
+
+    // A previously failed item may have settled after a submission timeout.
+    // Reconcile any indeterminate prior attempt with Horizon before paying
+    // again — only deterministic failures prove the ledger never changed.
+    let priorFailedRowId: string | undefined;
+    if (item.status === 'failed') {
+      const priorRow = await prisma.transaction.findFirst({
+        where: {
+          metadata: { path: ['payrollItemId'], equals: itemId },
+          status: 'failed',
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      priorFailedRowId = priorRow?.id;
+
+      // Reconciles an attempted payment hash with Horizon:
+      //  - 'recover' → it actually landed; caller should mark complete
+      //  - 'wait'    → still unresolved on-chain; retry later
+      //  - 'safe'    → confirmed failed / never landed; safe to re-pay
+      const reconcileAttempt = async (
+        attemptHash: string
+      ): Promise<'recover' | 'wait' | 'safe'> => {
+        const chain = await TransactionService.getTransactionStatus(attemptHash);
+        if (chain.status === 'successful') return 'recover';
+        if (chain.status === 'pending') return 'wait';
+        return 'safe';
+      };
+
+      // Attempt hash recorded directly on the item by the batch processor.
+      if (item.stellarTxId && item.errorMessage?.startsWith('SUBMISSION_TIMEOUT')) {
+        const outcome = await reconcileAttempt(item.stellarTxId);
+        if (outcome === 'recover') {
+          const recovered = await prisma.payrollItem.update({
+            where: { id: itemId },
+            data: { status: 'completed', stellarTxId: item.stellarTxId, errorMessage: null },
+          });
+          await logAudit(userId, 'payroll_item_recovered_on_chain', batchId, true, {
+            itemId,
+            stellarTxId: item.stellarTxId,
+          });
+          return mapToPayrollItem(recovered);
+        }
+        if (outcome === 'wait') {
+          throw new Error(
+            'Previous payment attempt is still unresolved on-chain; retry after reconciliation'
+          );
+        }
+      }
+
+      const indeterminate = await prisma.transaction.findFirst({
+        where: {
+          metadata: { path: ['payrollItemId'], equals: itemId },
+          status: 'failed',
+          errorCode: { in: ['SUBMISSION_TIMEOUT'] },
+          stellarTxId: { not: null },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (indeterminate?.stellarTxId) {
+        const outcome = await reconcileAttempt(indeterminate.stellarTxId);
+        if (outcome === 'recover') {
+          // The original payment actually landed — mark the item complete
+          // instead of creating a second payment.
+          const recovered = await prisma.payrollItem.update({
+            where: { id: itemId },
+            data: {
+              status: 'completed',
+              stellarTxId: indeterminate.stellarTxId,
+              errorMessage: null,
+            },
+          });
+          await logAudit(userId, 'payroll_item_recovered_on_chain', batchId, true, {
+            itemId,
+            stellarTxId: indeterminate.stellarTxId,
+          });
+          return mapToPayrollItem(recovered);
+        }
+        if (outcome === 'wait') {
+          throw new Error(
+            'Previous payment attempt is still unresolved on-chain; retry after reconciliation'
+          );
+        }
+        // outcome === 'safe' → deterministically never landed; retry below.
+      }
+    }
+
+    // Atomic claim — only pending/failed items can be paid.
+    const claim = await prisma.payrollItem.updateMany({
+      where: { id: itemId, status: { in: ['pending', 'failed'] } },
+      data: { status: 'processing' },
+    });
+    if (claim.count === 0) {
+      throw new Error('Payroll item cannot be paid in its current state');
+    }
+
+    try {
+      const payment = await TransactionService.buildAndSubmitPayment({
+        sourceWalletId: batch.walletId,
+        userId,
+        destination: item.recipientAddress,
+        amount: item.amount,
+        assetCode: item.assetCode,
+        assetIssuer: item.assetIssuer || undefined,
+        memo: item.memo || undefined,
+        metadata: { payrollItemId: itemId, payrollBatchId: batchId },
+        // Re-execution of a failed payment reuses the SAME transaction row
+        // (and its atomic failed→submitted claim) as the admin rebuild path,
+        // so payroll retries and admin rebuilds are mutually exclusive and
+        // can never both submit.
+        ...(priorFailedRowId ? { paymentId: priorFailedRowId } : {}),
+      });
+
+      const updated = await prisma.payrollItem.update({
+        where: { id: itemId },
+        data: {
+          status: 'completed',
+          stellarTxId: payment.stellarTxId ?? null,
+          errorMessage: null,
+        },
+      });
+
+      await logAudit(userId, 'payroll_item_paid', batchId, true, {
+        itemId,
+        stellarTxId: payment.stellarTxId,
+        amount: item.amount,
+        assetCode: item.assetCode,
+      });
+
+      return mapToPayrollItem(updated);
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+
+      // Persist the failure, but never swallow the payment error: the caller
+      // must learn the payment failed even if this write itself breaks.
+      // Retry once — if both writes fail, the item would stay wedged in
+      // `processing` (the claim guard only accepts pending/failed), so a
+      // second attempt is made before giving up and surfacing the error.
+      const persistItemFailure = async (): Promise<void> => {
+        try {
+          await prisma.payrollItem.update({
+            where: { id: itemId },
+            data: { status: 'failed', errorMessage: errorMsg.slice(0, 500) },
+          });
+        } catch (persistError) {
+          console.error('[PayrollService] Failed to persist payroll item failure:', persistError);
+          try {
+            await prisma.payrollItem.update({
+              where: { id: itemId },
+              data: { status: 'failed', errorMessage: errorMsg.slice(0, 500) },
+            });
+          } catch (retryError) {
+            console.error(
+              '[PayrollService] Payroll item remains in processing after failed persistence:',
+              retryError
+            );
+          }
+        }
+      };
+      await persistItemFailure();
+
+      await logAudit(userId, 'payroll_item_payment_failed', batchId, false, {
+        itemId,
+        error: errorMsg,
+      }).catch(() => undefined);
+
+      throw error;
+    }
+  },
+
+  /**
    * Approve a payroll batch
    */
   async approvePayrollBatch(batchId: string, userId: string): Promise<PayrollBatch> {
@@ -428,15 +626,45 @@ export const PayrollService = {
 
     const sourceKeypair = Keypair.fromSecret(decryptedSecretKey);
 
-    // Transition all selected items to processing status
+    // Claim the snapshot's still-payable items atomically. The status guard
+    // ensures an item completed concurrently by payPayrollItem is never
+    // reset to `processing` and paid a second time.
     await prisma.payrollItem.updateMany({
-      where: { id: { in: itemsToProcess.map((i) => i.id) } },
+      where: {
+        id: { in: itemsToProcess.map((i) => i.id) },
+        status: { in: ['pending', 'failed'] },
+      },
       data: { status: 'processing' },
     });
 
+    // Re-read the claimed rows so items that were paid concurrently between
+    // the batch snapshot and the claim drop out of execution entirely.
+    const claimedItems = await prisma.payrollItem.findMany({
+      where: { id: { in: itemsToProcess.map((i) => i.id) }, status: 'processing' },
+    });
+
+    if (claimedItems.length === 0) {
+      const updatedBatch = await prisma.payrollBatch.update({
+        where: { id: batchId },
+        data: { status: 'completed' },
+        include: { items: true },
+      });
+      await logAudit(userId, 'payroll_batch_process', batchId, true, {
+        total: 0,
+        successful: 0,
+        failed: 0,
+      });
+      return {
+        total: 0,
+        successful: 0,
+        failed: 0,
+        items: updatedBatch.items.map(mapToPayrollItem),
+      };
+    }
+
     // Group items by Asset (assetCode + assetIssuer) and Memo, as Stellar transaction has 1 memo and 100 operation limits
     const groups: { [key: string]: DbPayrollItem[] } = {};
-    for (const item of itemsToProcess) {
+    for (const item of claimedItems) {
       const assetKey = `${item.assetCode}:${item.assetIssuer || ''}`;
       const memoKey = item.memo || '';
       const groupKey = `${assetKey}::${memoKey}`;
@@ -457,6 +685,9 @@ export const PayrollService = {
       const chunkSize = 100;
       for (let i = 0; i < groupItems.length; i += chunkSize) {
         const chunk = groupItems.slice(i, i + chunkSize);
+        // Hash is computed before submission so an indeterminate failure can
+        // be reconciled later instead of blindly re-paid.
+        let txHash: string | undefined;
 
         try {
           // Fetch the source account to get the latest sequence number
@@ -492,6 +723,7 @@ export const PayrollService = {
 
           const transaction = txBuilder.build();
           transaction.sign(sourceKeypair);
+          txHash = transaction.hash().toString('hex');
 
           // Submit to Horizon network
           const response = await server.submitTransaction(transaction);
@@ -511,6 +743,33 @@ export const PayrollService = {
           }
         } catch (batchError: unknown) {
           const batchErrMsg = batchError instanceof Error ? batchError.message : String(batchError);
+
+          // An indeterminate failure (timeout / network drop / Horizon 5xx)
+          // may have actually landed on-chain. Re-submitting the chunk would
+          // risk double-paying every recipient, so record the attempted hash
+          // and fail the items safely — they remain retryable through
+          // payPayrollItem, which reconciles the hash with Horizon first.
+          const responseStatus = (batchError as { response?: { status?: number } } | undefined)
+            ?.response?.status;
+          // Any network-level failure or 5xx (including 504 gateway timeouts)
+          // leaves the on-chain outcome unknown — treat it as indeterminate.
+          const isIndeterminate = responseStatus === undefined || responseStatus >= 500;
+
+          if (isIndeterminate && txHash) {
+            for (const item of chunk) {
+              const updated = await prisma.payrollItem.update({
+                where: { id: item.id },
+                data: {
+                  status: 'failed',
+                  stellarTxId: txHash,
+                  errorMessage: `SUBMISSION_TIMEOUT:${txHash} — ${batchErrMsg}`.slice(0, 500),
+                },
+              });
+              failedItems.push(updated);
+            }
+            continue;
+          }
+
           // Log batch failure and fallback to sequential processing
           console.warn(
             `Batch processing failed for chunk. Retrying items individually. Error: ${batchErrMsg}`
@@ -587,7 +846,7 @@ export const PayrollService = {
     });
 
     const result: ProcessPayrollResult = {
-      total: itemsToProcess.length,
+      total: claimedItems.length,
       successful: successfulItems.length,
       failed: failedItems.length,
       items: updatedBatch.items.map(mapToPayrollItem),
